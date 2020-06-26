@@ -87,28 +87,49 @@ def do_request(block, buf):
         json_data = json.loads(data)
         data = None
 
-    response = requests.request(method, url, verify=verify_ssl, headers=headers, data=data, files=files, json=json_data)
-    content_type = response.headers.get('Content-Type', '').split(';')[0]
+    try:
+        response = requests.request(method, url, verify=verify_ssl, headers=headers, data=data, files=files, json=json_data)
+        content_type = response.headers.get('Content-Type', '').split(';')[0]
+        response_body = response.text
+        if JSON_REGEX.search(content_type):
+            content_type = 'application/json'
+            try:
+                response_body = json.dumps(
+                    json.loads(response.text), sort_keys=True, indent=2,
+                    separators=(',', ': '),
+                    ensure_ascii=vim.eval('g:http_client_json_escape_utf')=='1')
+            except ValueError:
+                pass
 
-    response_body = response.text
-    if JSON_REGEX.search(content_type):
-        content_type = 'application/json'
-        try:
-            response_body = json.dumps(
-                json.loads(response.text), sort_keys=True, indent=2,
-                separators=(',', ': '),
-                ensure_ascii=vim.eval('g:http_client_json_escape_utf')=='1')
-        except ValueError:
-            pass
+        display = (
+            response_body.split('\n') +
+            ['', '// status code: %s' % response.status_code] +
+            ['// %s: %s' % (k, v) for k, v in response.headers.items()]
+        )
 
-    display = (
-        response_body.split('\n') +
-        ['', '// status code: %s' % response.status_code] +
-        ['// %s: %s' % (k, v) for k, v in response.headers.items()]
-    )
+    except requests.exceptions.Timeout as err:
+        display, content_type = on_error("Timeout Error", err)
+
+    except requests.exceptions.TooManyRedirects as err:
+        display, content_type = on_error("Too many redirects", err)
+
+    except requests.exceptions.RequestException as err:
+        display, content_type = on_error("Request exception", err)
 
     return display, content_type
 
+def on_error(message, err):
+    print(message)
+    display = (
+        [message] + ["Request data:", ""] +
+        ["Method:   {0}".format(err.request.method)] +
+        ["Path:     {0}".format(err.request.path_url)] +
+        ["Headers:  {0}".format(err.request.headers)] +
+        ["Body:     {0}".format(err.request.body)] +
+        ["Response: {0}".format(err.response)]
+    )
+    content_type = "text/plain"
+    return display, content_type
 
 # Vim methods.
 
